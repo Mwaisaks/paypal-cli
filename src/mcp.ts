@@ -29,6 +29,8 @@ function mcpShape(op: Op): z.ZodRawShape {
 
 export async function startMcp(globals: GlobalOpts): Promise<void> {
   let cfg: Config | undefined;
+  /** Exact money-moving calls this server has already previewed; confirm=true is refused for anything else. */
+  const previewed = new Set<string>();
   const getCfg = () => (cfg ??= loadConfig(globals));
 
   const server = new McpServer(
@@ -67,13 +69,16 @@ export async function startMcp(globals: GlobalOpts): Promise<void> {
             if (c.env === 'live') {
               return { ...text('Refused: paypal-cli does not move live money through MCP. Run the command in a terminal.'), isError: true };
             }
-            if (confirm !== true) {
+            const key = `${op.name} ${command}`;
+            if (confirm !== true || !previewed.has(key)) {
+              previewed.add(key);
               return text(
                 `APPROVAL REQUIRED (${c.env}): ${op.preview?.(input as never, c) ?? op.name}.\n` +
                   `Equivalent command: ${command}\n` +
                   'Ask the user to approve this exact action. Only if they say yes, call this tool again with the same arguments and confirm=true.',
               );
             }
+            previewed.delete(key); // one approval, one execution
           }
           const data = await op.run(c, input as never);
           return text(`${command}\n\n${JSON.stringify(data, null, 2)}`);
