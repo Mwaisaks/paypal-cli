@@ -17,6 +17,17 @@ function log(cfg: Config, line: string): void {
   if (cfg.verbose) process.stderr.write(maskString(`[http] ${line}`) + '\n');
 }
 
+/** Turns a fetch failure into a readable reason, e.g. "network error (ENOTFOUND api-m.sandbox.paypal.com)". */
+export function netReason(e: unknown, timeoutMs: number): string {
+  if (!(e instanceof Error)) return String(e);
+  if (e.name === 'TimeoutError' || e.name === 'AbortError') {
+    return `timed out after ${timeoutMs} ms (slow network? raise PAYPAL_CLI_TIMEOUT_MS)`;
+  }
+  const cause = (e as { cause?: { code?: string; message?: string } }).cause;
+  if (cause?.code || cause?.message) return `network error (${cause.code ?? cause.message})`;
+  return e.message;
+}
+
 /** Client-credentials token. Cached per process; secrets are registered for masking first. */
 export async function getToken(cfg: Config, { fresh = false } = {}): Promise<TokenInfo> {
   registerSecret(cfg.clientSecret);
@@ -26,15 +37,28 @@ export async function getToken(cfg: Config, { fresh = false } = {}): Promise<Tok
 
   const path = '/v1/oauth2/token';
   log(cfg, `POST ${path}`);
-  const res = await fetch(BASE_URL[cfg.env] + path, {
-    method: 'POST',
-    headers: {
-      Authorization: 'Basic ' + Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString('base64'),
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: 'grant_type=client_credentials',
-    signal: AbortSignal.timeout(cfg.timeoutMs),
-  });
+  let res: Response;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      // Getting a token has no side effects, so it is safe to retry on network errors.
+      res = await fetch(BASE_URL[cfg.env] + path, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Basic ' + Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString('base64'),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'grant_type=client_credentials',
+        signal: AbortSignal.timeout(cfg.timeoutMs),
+      });
+      break;
+    } catch (e) {
+      if (attempt < 3) {
+        await sleep(400 * 2 ** (attempt - 1));
+        continue;
+      }
+      throw new Error(`POST ${path} failed: ${netReason(e, cfg.timeoutMs)}`);
+    }
+  }
   const payload = await readBody(res);
   log(cfg, `-> ${res.status}`);
   if (!res.ok) {
@@ -109,8 +133,7 @@ export async function api<T = unknown>(cfg: Config, method: string, path: string
         await sleep(400 * 2 ** (attempt - 1));
         continue;
       }
-      const reason = e instanceof Error ? (e.name === 'TimeoutError' ? `timed out after ${cfg.timeoutMs} ms` : e.message) : String(e);
-      throw new Error(`${method} ${reqInfo.path} failed: ${reason}`);
+      throw new Error(`${method} ${reqInfo.path} failed: ${netReason(e, cfg.timeoutMs)}`);
     }
 
     const debugId = res.headers.get('paypal-debug-id') ?? undefined;

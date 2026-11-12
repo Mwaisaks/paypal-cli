@@ -18,15 +18,16 @@ developer dashboard or into a throwaway script:
   explicit human approval.
 
 ```
-$ paypal-cli payouts get 5UXD2E8A7EBQJ
-✗ 403 NOT_AUTHORIZED (debug_id 2d6f1b0e3c4a1) GET /v1/payments/payouts/5UXD2E8A7EBQJ
-  Authorization failed due to insufficient permissions.
+$ paypal-cli orders capture 238589717H366752P
+→ Capture payment for order 238589717H366752P (sandbox)
+✗ 422 UNPROCESSABLE_ENTITY/ORDER_NOT_APPROVED (debug_id f998238caff6d) POST /v2/checkout/orders/238589717H366752P/capture
+  - ORDER_NOT_APPROVED: Payer has not yet approved the Order for payment. …
   Run `paypal-cli explain` for the likely cause and fix.
 
 $ paypal-cli explain
-cause: This app does not have the "Payouts" feature, so its token lacks the scope for /v1/payments/payouts/….
-fix:   Dashboard → Apps & Credentials → your sandbox app → Features → enable "Payouts", save,
-       then run `paypal-cli doctor` to confirm the new scope.
+cause: The buyer has not approved the order yet.
+fix:   Open the order's approve link, log in as a sandbox *personal* account and approve, then capture.
+       `paypal-cli orders create --wait --capture` does all of it.
 ```
 
 ## Why
@@ -184,6 +185,8 @@ PayPal SDK context to the coding agent. At runtime, `explain` uses Claude throug
   - and can't be resent.
 
   Use a real sandbox event to test signature verification.
+- **Real events** take a few minutes to show up in `events list` after the action that caused them.
+  The sandbox doesn't return per-delivery attempts on an event.
 - **Sandbox accounts** can only be created in the dashboard. PayPal has no public API for this.
 - **Roadmap:**
   - `listen`: a tunnel plus a temporary webhook that forwards events to localhost

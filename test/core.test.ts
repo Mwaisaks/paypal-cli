@@ -105,3 +105,12 @@ describe('operation registry', () => {
     expect(() => sinceToIso('soon')).toThrow();
   });
 });
+
+describe('network errors', () => {
+  it('names the cause of a fetch failure and of a timeout', async () => {
+    const { netReason } = await import('../src/http.js');
+    const fail = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } });
+    expect(netReason(fail, 20000)).toBe('network error (ENOTFOUND)');
+    expect(netReason(Object.assign(new Error('x'), { name: 'TimeoutError' }), 20000)).toMatch(/timed out after 20000 ms/);
+  });
+});

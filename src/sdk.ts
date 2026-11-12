@@ -45,7 +45,16 @@ export function sdkClient(cfg: Config): Client {
 
 /** Turns the SDK's ApiError (typed CustomError or bare) into our PayPalApiError. */
 export function fromSdkError(err: unknown, method: string, path: string, cfg: Config): unknown {
-  if (!(err instanceof ApiError)) return err;
+  if (!(err instanceof ApiError)) {
+    // Transport failures come from the SDK's axios adapter, e.g. "timeout of 20000ms exceeded".
+    if (err instanceof Error && !(err instanceof PayPalApiError)) {
+      const msg = /timeout/i.test(err.message)
+        ? `timed out after ${cfg.timeoutMs} ms (slow network? raise PAYPAL_CLI_TIMEOUT_MS)`
+        : err.message;
+      return new Error(`${method} ${path} failed: ${msg}`);
+    }
+    return err;
+  }
   let payload: unknown = err.result;
   if (payload === undefined && typeof err.body === 'string') {
     try {

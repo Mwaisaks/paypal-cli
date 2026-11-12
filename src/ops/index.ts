@@ -44,7 +44,7 @@ interface WebhookEvent {
   event_type: string;
   summary?: string;
   resource_type?: string;
-  resource?: { id?: string };
+  resource?: { id?: string; payout_item_id?: string; batch_header?: { payout_batch_id?: string } };
   transmissions?: { webhook_id?: string; http_status?: number; status?: string; time_stamp?: string; transmission_id?: string }[];
 }
 
@@ -194,9 +194,13 @@ const eventsList = defineOp({
       ? 'No events in that window. Note: simulated events (paypal-cli trigger) never appear here.'
       : table(
           ['Event ID', 'When', 'Type', 'Resource', 'Summary'],
-          events.map((e) => [e.id, ago(e.create_time), e.event_type, e.resource?.id, (e.summary ?? '').slice(0, 40)]),
+          events.map((e) => [e.id, ago(e.create_time), e.event_type, resourceId(e), (e.summary ?? '').slice(0, 40)]),
         ),
 });
+
+/** Payout events carry their ID in payout_item_id or batch_header, not in resource.id. */
+const resourceId = (e: WebhookEvent) =>
+  e.resource?.id ?? e.resource?.payout_item_id ?? e.resource?.batch_header?.payout_batch_id;
 
 const eventsShow = defineOp({
   name: 'events_show',
@@ -212,7 +216,7 @@ const eventsShow = defineOp({
       ['type', e.event_type],
       ['created', `${e.create_time} (${ago(e.create_time)})`],
       ['summary', e.summary],
-      ['resource', `${e.resource_type ?? ''} ${e.resource?.id ?? ''}`.trim()],
+      ['resource', `${e.resource_type ?? ''} ${resourceId(e) ?? ''}`.trim()],
     ]);
     const tx = e.transmissions?.length
       ? '\n\nDeliveries:\n' +
@@ -395,6 +399,12 @@ interface PayoutBatch {
   }[];
 }
 
+type PayoutItem = NonNullable<PayoutBatch['items']>[number] & {
+  payout_batch_id?: string;
+  payout_item_fee?: { value: string; currency: string };
+  time_processed?: string;
+};
+
 const payoutsSend = defineOp({
   name: 'payouts_send',
   command: ['payouts', 'send'],
@@ -475,7 +485,28 @@ const payoutsItem = defineOp({
   kind: 'read',
   input: { itemId: z.string().describe('Payout item ID') },
   positional: ['itemId'],
-  run: (cfg, { itemId }) => api(cfg, 'GET', `/v1/payments/payouts-item/${encodeURIComponent(itemId)}`),
+  run: (cfg, { itemId }) =>
+    api<PayoutItem>(cfg, 'GET', `/v1/payments/payouts-item/${encodeURIComponent(itemId)}`),
+  render: (i: PayoutItem) => {
+    const head = kv([
+      ['item', i.payout_item_id],
+      ['batch', i.payout_batch_id],
+      ['status', statusColor(i.transaction_status)],
+      ['receiver', i.payout_item?.receiver],
+      ['amount', i.payout_item?.amount ? `${i.payout_item.amount.value} ${i.payout_item.amount.currency}` : undefined],
+      ['fee', i.payout_item_fee ? `${i.payout_item_fee.value} ${i.payout_item_fee.currency}` : undefined],
+      ['transaction', i.transaction_id],
+      ['processed', i.time_processed ? `${i.time_processed} (${ago(i.time_processed)})` : undefined],
+    ]);
+    if (!i.errors?.name) return head;
+    let note = '';
+    if (i.errors.name === 'RECEIVER_UNREGISTERED') {
+      note =
+        '\nThe receiver has no PayPal account. The money waits (UNCLAIMED) for 30 days, then returns. ' +
+        'In sandbox, pay a sandbox personal account email instead (Dashboard → Sandbox → Accounts).';
+    }
+    return `${head}\n\n${pc.yellow(i.errors.name)}: ${i.errors.message ?? ''}${note}`;
+  },
 });
 
 // ---------- explain (rules only; the CLI command adds the AI layer) ----------
