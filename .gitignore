@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+coverage/
+# private planning notes
+KICKOFF.md
+PLAN.md
+RESEARCH.md

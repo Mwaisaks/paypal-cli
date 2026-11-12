@@ -1,0 +1,52 @@
+{
+  "name": "paypal-cli",
+  "version": "0.1.0",
+  "description": "Unofficial PayPal developer CLI and MCP server: webhooks, events, orders, payouts, doctor and an AI error explainer. Not affiliated with PayPal.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "paypal-cli": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@paypal/paypal-server-sdk": "^2.5.0",
+    "cli-table3": "^0.6.5",
+    "commander": "^14.0.3",
+    "dotenv": "^18.0.10",
+    "picocolors": "^1.1.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mwaisaks/paypal-cli.git"
+  },
+  "keywords": [
+    "paypal",
+    "cli",
+    "webhooks",
+    "payouts",
+    "mcp",
+    "developer-tools",
+    "unofficial"
+  ]
+}
