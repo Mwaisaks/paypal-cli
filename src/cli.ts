@@ -148,9 +148,9 @@ async function runExplain(saved: SavedError, globals: Globals, fromFailure = fal
   else for (const h of hints) process.stderr.write(`${pc.yellow('cause:')} ${h.cause}\n${pc.cyan('fix:')}   ${h.fix}\n`);
 
   if (noAi) return;
-  if (!cfg.anthropicKey) {
+  if (!cfg.aiProvider) {
     process.stderr.write(
-      pc.dim('\nSet ANTHROPIC_API_KEY for an AI explanation, or ask your coding agent through `paypal-cli mcp`.') + '\n',
+      pc.dim('\nSet ANTHROPIC_API_KEY or GROQ_API_KEY for an AI explanation, or ask your coding agent through `paypal-cli mcp`.') + '\n',
     );
     return;
   }
@@ -162,7 +162,7 @@ async function runExplain(saved: SavedError, globals: Globals, fromFailure = fal
       /* explanation still works without scopes */
     }
   }
-  process.stderr.write(pc.dim(`\nAsking ${cfg.model}…`) + '\n');
+  process.stderr.write(pc.dim(`\nAsking ${cfg.model} (${cfg.aiProvider})…`) + '\n');
   try {
     const text = await explainWithAI(saved, hints, cfg, scopes);
     if (text) process.stdout.write('\n' + pc.bold('AI explanation') + '\n' + maskString(text) + '\n');
@@ -173,7 +173,7 @@ async function runExplain(saved: SavedError, globals: Globals, fromFailure = fal
 
 program
   .command('explain')
-  .description('Explain the last PayPal error (or one saved to a file): likely cause, exact fix. Rules first, then Claude if ANTHROPIC_API_KEY is set.')
+  .description('Explain the last PayPal error (or one saved to a file): likely cause, exact fix. Rules first, then an AI model if ANTHROPIC_API_KEY or GROQ_API_KEY is set.')
   .option('--file <path>', 'explain an error payload from a JSON file instead (PayPal error body or `--json` output)')
   .option('--no-ai', 'rule-based hints only')
   .action(async (opts: { file?: string; ai: boolean }, command: Command) => {

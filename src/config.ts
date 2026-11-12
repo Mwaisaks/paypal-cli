@@ -11,6 +11,9 @@ export interface Config {
   env: PayPalEnv;
   webhookId?: string;
   anthropicKey?: string;
+  groqKey?: string;
+  /** Which model provider `explain` uses: Anthropic if its key is set, else Groq. Override with PAYPAL_CLI_AI_PROVIDER. */
+  aiProvider?: AiProvider;
   model: string;
   timeoutMs: number;
   verbose: boolean;
@@ -36,7 +39,19 @@ export const DASHBOARD_URL: Record<PayPalEnv, string> = {
   live: 'https://developer.paypal.com/dashboard/applications/live',
 };
 
-export const DEFAULT_MODEL = 'claude-opus-5-5';
+export type AiProvider = 'anthropic' | 'groq';
+export const DEFAULT_MODELS: Record<AiProvider, string> = {
+  anthropic: 'claude-opus-5-5',
+  groq: 'openai/gpt-oss-120b',
+};
+
+function pickProvider(anthropicKey?: string, groqKey?: string): AiProvider | undefined {
+  const forced = process.env.PAYPAL_CLI_AI_PROVIDER?.trim().toLowerCase();
+  if (forced === 'anthropic' || forced === 'groq') return forced;
+  if (anthropicKey) return 'anthropic';
+  if (groqKey) return 'groq';
+  return undefined;
+}
 
 export function configDir(): string {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
@@ -64,13 +79,18 @@ export function loadConfig(opts: GlobalOpts = {}, { requireCreds = true } = {}):
         '  and put both values in .env (see .env.example) or export them.',
     );
   }
+  const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim() || undefined;
+  const groqKey = process.env.GROQ_API_KEY?.trim() || undefined;
+  const aiProvider = pickProvider(anthropicKey, groqKey);
   return {
     clientId,
     clientSecret,
     env: rawEnv,
     webhookId: process.env.PAYPAL_WEBHOOK_ID?.trim() || undefined,
-    anthropicKey: process.env.ANTHROPIC_API_KEY?.trim() || undefined,
-    model: process.env.PAYPAL_CLI_MODEL?.trim() || DEFAULT_MODEL,
+    anthropicKey,
+    groqKey,
+    aiProvider,
+    model: process.env.PAYPAL_CLI_MODEL?.trim() || (aiProvider ? DEFAULT_MODELS[aiProvider] : DEFAULT_MODELS.anthropic),
     timeoutMs: Number(process.env.PAYPAL_CLI_TIMEOUT_MS) || 20_000,
     verbose: !!opts.verbose,
     json: !!opts.json,

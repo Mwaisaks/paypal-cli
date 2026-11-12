@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { DASHBOARD_URL, type Config } from './config.js';
 import type { SavedError } from './errors.js';
-import { maskValue } from './mask.js';
+import { maskValue, registerSecret } from './mask.js';
 import { pc } from './output.js';
 import { featureForPath } from './scopes.js';
 
@@ -121,23 +121,32 @@ Fix:
 2. …
 Why: one sentence linking the issue code to the cause.
 
-Rules: be specific to the payload, never generic. Prefer paypal-cli commands where they exist:
-auth check, doctor, webhooks list|create|delete|id|event-types, events list|show|resend, trigger,
-orders create|get|capture, payouts send|get|item. Mention the debug_id only for PayPal support.
+Rules: be specific to the payload, never generic. Prefer paypal-cli commands, but ONLY these exist:
+paypal-cli auth check | doctor | webhooks list|create|delete|id|event-types | events list|show|resend |
+trigger | orders create|get|capture | payouts send|get|item | explain. There is no "orders list" and no
+refunds command; never invent commands or flags (sandbox is the default, so do not add --env sandbox).
+Mention the debug_id only for PayPal support.
 If the rule-based hints are right, build on them; if they are wrong, say so. Do not invent API fields.
 No markdown headers, no bold.`;
 
-/** Asks Claude for an explanation. Returns undefined when no key is configured. */
+/** Asks the configured model (Claude or Groq) for an explanation. Returns undefined when no key is configured. */
 export async function explainWithAI(e: SavedError, hints: Hint[], cfg: Config, scopes?: string[]): Promise<string | undefined> {
-  if (!cfg.anthropicKey) return undefined;
-  const client = new Anthropic({ apiKey: cfg.anthropicKey, timeout: 60_000 });
   const context = maskValue({ error: e, rule_hints: hints, app_scopes: scopes, environment: e.request.env ?? cfg.env });
+  const prompt = `Explain this failed PayPal call:\n\n${JSON.stringify(context, null, 2)}`;
+  if (cfg.aiProvider === 'anthropic' && cfg.anthropicKey) return explainWithClaude(prompt, cfg.anthropicKey, cfg.model);
+  if (cfg.aiProvider === 'groq' && cfg.groqKey) return explainWithGroq(prompt, cfg.groqKey, cfg.model);
+  return undefined;
+}
+
+async function explainWithClaude(prompt: string, apiKey: string, model: string): Promise<string | undefined> {
+  registerSecret(apiKey);
+  const client = new Anthropic({ apiKey, timeout: 60_000 });
   const response = await client.messages.create({
-    model: cfg.model,
+    model,
     max_tokens: 16000,
     output_config: { effort: 'low' },
     system: SYSTEM,
-    messages: [{ role: 'user', content: `Explain this failed PayPal call:\n\n${JSON.stringify(context, null, 2)}` }],
+    messages: [{ role: 'user', content: prompt }],
   });
   if (response.stop_reason === 'refusal') return undefined;
   return response.content
@@ -145,4 +154,32 @@ export async function explainWithAI(e: SavedError, hints: Hint[], cfg: Config, s
     .map((b) => b.text)
     .join('\n')
     .trim();
+}
+
+/** Groq exposes an OpenAI-compatible chat completions endpoint. */
+async function explainWithGroq(prompt: string, apiKey: string, model: string): Promise<string | undefined> {
+  registerSecret(apiKey);
+  const body: Record<string, unknown> = {
+    model,
+    max_completion_tokens: 4000,
+    temperature: 0.2,
+    messages: [
+      { role: 'system', content: SYSTEM },
+      { role: 'user', content: prompt },
+    ],
+  };
+  // gpt-oss models reason first; keep that short and out of the answer.
+  if (model.startsWith('openai/gpt-oss')) Object.assign(body, { reasoning_effort: 'low', include_reasoning: false });
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60_000),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    choices?: { message?: { content?: string } }[];
+    error?: { message?: string };
+  };
+  if (!res.ok) throw new Error(`Groq ${res.status}: ${data.error?.message ?? res.statusText}`);
+  return data.choices?.[0]?.message?.content?.trim() || undefined;
 }
